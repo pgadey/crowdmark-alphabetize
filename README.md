@@ -66,9 +66,8 @@ templates may need adjustments.
 
 ## Student privacy
 
-Real Crowdmark exports contain student names, emails and student numbers, so don't
-commit them. The included `.gitignore` excludes every PDF except `example-booklets.pdf`,
-which is entirely synthetic and doesn't work with Crowdmark.
+This software uses `pypdf` to handle student data. It is all done locally with no cloud services.
+Everything should remain entirely private.
 
 This is an independent project, not affiliated with or endorsed by Crowdmark.
 
