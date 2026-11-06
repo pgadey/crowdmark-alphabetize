@@ -14,6 +14,8 @@ edited, so the QR codes are unaffected.
 > example PDF, was vibecoded with assistance from [Claude](https://claude.com/claude-code).
 > Check the output before you print a whole term test.
 
+This is an independent project, not affiliated with or endorsed by Crowdmark.
+
 ## Usage
 
 ```
@@ -66,8 +68,6 @@ templates may need adjustments.
 
 This software uses `pypdf` to handle student data. It is all done locally with no cloud services.
 Everything should remain entirely private.
-
-This is an independent project, not affiliated with or endorsed by Crowdmark.
 
 ## License
 
