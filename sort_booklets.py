@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""Sort a Crowdmark pre-matched booklet PDF for printing and room allocation.
+
+Blank (extra) booklets come first, followed by the matched booklets in
+alphabetical order: LAST NAME, First Name. Each booklet's pages stay together
+and in order. No page content is changed, so the QR codes are unaffected.
+
+    pip install pypdf
+    python3 sort_booklets.py booklets.pdf                 # writes booklets-sorted.pdf
+    python3 sort_booklets.py booklets.pdf -o sorted.pdf
+
+The name labels are set in FIRST_NAME_LABEL and LAST_NAME_LABEL below. If your
+cover page words them differently, change them to match.
+"""
+
+import argparse
+import re
+import sys
+import unicodedata
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from pypdf import PdfReader, PdfWriter
+
+FIRST_NAME_LABEL = "First (Given) Name:"
+LAST_NAME_LABEL = "Last (Family) Name:"
+
+# How far above or below its label's baseline (in points) a printed value can
+# sit. Must be smaller than the spacing between rows on the cover page.
+ROW_TOLERANCE = 15
+
+HEADER = re.compile(r"#(\d+) Page (\d+) of (\d+)")
+
+
+class BookletError(Exception):
+    """The PDF doesn't have the structure this tool expects."""
+
+
+@dataclass
+class Booklet:
+    number: int
+    page_count: int
+    pages: dict = field(default_factory=dict)  # page within booklet -> PDF page index
+    first: str = ""
+    last: str = ""
+
+    @property
+    def is_blank(self):
+        return not (self.first or self.last)
+
+    @property
+    def display_name(self):
+        return "(blank)" if self.is_blank else f"{self.last.upper()}, {self.first}"
+
+
+def text_fragments(page):
+    """Return (x, y, text) for each piece of text on the page.
+
+    Crowdmark stamps student details on as an overlay, so they aren't next to
+    their labels in the text order and have to be matched up by position.
+    """
+    fragments = []
+
+    def visit(text, cm, tm, font_dict, font_size):
+        text = " ".join(text.split())
+        if text:
+            x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
+            y = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
+            fragments.append((x, y, text))
+
+    page.extract_text(visitor_text=visit)
+    return fragments
+
+
+def field_value(fragments, label, booklet_number):
+    """Return the text printed to the right of a label, or "" if there is none."""
+    for label_x, label_y, text in fragments:
+        if text == label:
+            found = [
+                (x, value)
+                for x, y, value in fragments
+                if x > label_x and abs(y - label_y) <= ROW_TOLERANCE
+            ]
+            return " ".join(value for _, value in sorted(found))
+    # A missing label must not look like a blank booklet: the student's paper
+    # would be handed out as a spare.
+    raise BookletError(f'booklet #{booklet_number}: label "{label}" not found on its first page')
+
+
+def read_booklets(reader):
+    """Group the PDF's pages into booklets and read the name from each cover."""
+    booklets = {}
+    for index, page in enumerate(reader.pages):
+        fragments = text_fragments(page)
+        match = next(filter(None, (HEADER.fullmatch(text) for _, _, text in fragments)), None)
+        if match is None:
+            raise BookletError(f'PDF page {index + 1}: no "#N Page k of K" header found')
+
+        number, page_number, page_count = map(int, match.groups())
+        booklet = booklets.setdefault(number, Booklet(number, page_count))
+        if page_number in booklet.pages or page_count != booklet.page_count:
+            raise BookletError(f"PDF page {index + 1}: conflicting header for booklet #{number}")
+        booklet.pages[page_number] = index
+
+        if page_number == 1:
+            booklet.first = field_value(fragments, FIRST_NAME_LABEL, number)
+            booklet.last = field_value(fragments, LAST_NAME_LABEL, number)
+
+    if not booklets:
+        raise BookletError("the PDF has no pages")
+    for booklet in booklets.values():
+        if sorted(booklet.pages) != list(range(1, booklet.page_count + 1)):
+            raise BookletError(
+                f"booklet #{booklet.number}: expected {booklet.page_count} pages, "
+                f"found page(s) {sorted(booklet.pages)}"
+            )
+    return list(booklets.values())
+
+
+def collation_key(name):
+    """Normalize a name so accents, case and punctuation don't affect its position."""
+    decomposed = unicodedata.normalize("NFKD", name)
+    kept = (c for c in decomposed if c.isalnum() or c.isspace())
+    return " ".join("".join(kept).casefold().split())
+
+
+def sort_key(booklet):
+    """Blanks first (keeping their original order), then by last name, first name."""
+    if booklet.is_blank:
+        return (0,)
+    return (1, collation_key(booklet.last), collation_key(booklet.first))
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Sort a Crowdmark pre-matched PDF: blanks first, then LAST NAME, First Name."
+    )
+    parser.add_argument("input", type=Path, help="PDF generated by Crowdmark")
+    parser.add_argument("-o", "--output", type=Path, help="output PDF (default: INPUT-sorted.pdf)")
+    args = parser.parse_args()
+
+    output = args.output or args.input.with_name(f"{args.input.stem}-sorted.pdf")
+    if output.resolve() == args.input.resolve():
+        parser.error("the output file must be different from the input file")
+
+    reader = PdfReader(args.input)
+    try:
+        booklets = sorted(read_booklets(reader), key=sort_key)
+    except BookletError as error:
+        sys.exit(f"Error: {error}. No output written.")
+
+    writer = PdfWriter()
+    next_page = 1
+    for booklet in booklets:
+        for page_number in sorted(booklet.pages):
+            writer.add_page(reader.pages[booklet.pages[page_number]])
+        last_page = next_page + booklet.page_count - 1
+        print(f"pp. {next_page:>5}-{last_page:<5}  #{booklet.number:<5}  {booklet.display_name}")
+        next_page = last_page + 1
+    writer.write(output)
+
+    blanks = sum(booklet.is_blank for booklet in booklets)
+    print(f"\n{len(booklets) - blanks} matched + {blanks} blank booklets -> {output}")
+    for booklet in booklets:
+        if not booklet.is_blank and not (booklet.first and booklet.last):
+            print(f"Warning: booklet #{booklet.number} has a partial name: {booklet.display_name}")
+
+
+if __name__ == "__main__":
+    main()
