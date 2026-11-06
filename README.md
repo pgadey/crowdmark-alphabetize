@@ -2,9 +2,7 @@
 
 Crowdmark's [pre-matched booklets](https://www.crowdmark.com/help/using-pre-matched-booklets)
 come as a single PDF in no particular order. If students are assigned to rooms by
-last name, that stack is awkward to print and hand out.
-
-This script reorders the PDF so you can print it and split it by room:
+last name, that stack is awkward to print and hand out. This script reorders the PDF so you can print it and split it by room:
 
 1. Blank (extra) booklets come first.
 2. Matched booklets follow, sorted by `LAST NAME, First Name`.
