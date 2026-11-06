@@ -22,7 +22,7 @@ This is an independent project, not affiliated with or endorsed by Crowdmark.
 ```
 pip install pypdf
 python3 sort_booklets.py booklets.pdf                # writes booklets-sorted.pdf
-python3 sort_booklets.py booklets.pdf -o sorted.pdf
+python3 sort_booklets.py booklets.pdf -o sorted.pdf  # writes sorted.pdf
 ```
 
 The script prints where each booklet ended up, which helps when dividing the stack
